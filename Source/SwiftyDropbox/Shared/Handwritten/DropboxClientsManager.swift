@@ -32,8 +32,8 @@ public class DropboxClientsManager {
         Constants.versionSDK
     }
 
-    struct OAuthSetupContext {
-        enum UserKind {
+    public struct OAuthSetupContext {
+        public enum UserKind {
             case single
             case multi(tokenUid: String?)
         }
@@ -43,7 +43,7 @@ public class DropboxClientsManager {
         var includeBackgroundClient: Bool
     }
 
-    static func setupWithOAuthManager(
+    public static func setupWithOAuthManager(
         _ appKey: String, oAuthManager: DropboxOAuthManager,
         transportClient: DropboxTransportClient?,
         backgroundTransportClient: DropboxTransportClient? = nil,

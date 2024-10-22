@@ -2,12 +2,12 @@
 //  Copyright (c) 2022 Dropbox Inc. All rights reserved.
 //
 
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 
 import Foundation
 import UIKit
 
-@available(iOS 13.0, *)
+@available(iOS 13.0, tvOS 13.0, *)
 extension UIApplication {
     public func findKeyWindow() -> UIWindow? {
         connectedScenes

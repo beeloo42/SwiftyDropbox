@@ -521,7 +521,7 @@ public class MobileSharedApplication: SharedApplication {
         if let controller = controller {
             self.controller = controller
         } else {
-            if #available(iOS 13, *) {
+            if #available(iOS 13, tvOS 13.0, *) {
                 self.controller = sharedApplication.findKeyWindow()?.rootViewController
             } else {
                 self.controller = sharedApplication.keyWindow?.rootViewController
