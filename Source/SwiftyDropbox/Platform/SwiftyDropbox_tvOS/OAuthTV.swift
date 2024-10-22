@@ -4,11 +4,9 @@
 
 import Foundation
 
-#if os(iOS)
+#if os(tvOS)
 
-import SafariServices
 import UIKit
-import WebKit
 
 extension DropboxClientsManager {
     /// Starts a "token" flow.
@@ -255,7 +253,7 @@ extension DropboxClientsManager {
         )
     }
 
-    private static func oAuthManager(_ appKey: String, secureStorageAccess: SecureStorageAccess) -> DropboxMobileOAuthManager {
+    public static func oAuthManager(_ appKey: String, secureStorageAccess: SecureStorageAccess) -> DropboxMobileOAuthManager {
         .init(appKey: appKey, secureStorageAccess: secureStorageAccess, dismissSharedAppAuthController: {
             if let sharedMobileApplication = MobileSharedApplication.sharedMobileApplication {
                 sharedMobileApplication.dismissAuthController()
@@ -263,246 +261,6 @@ extension DropboxClientsManager {
         })
     }
 }
-
-#endif
-
-public class DropboxMobileOAuthManager: DropboxOAuthManager {
-    let dauthRedirectURL: URL
-    let dismissSharedAppAuthController: () -> Void
-
-    public convenience init(
-        appKey: String,
-        host: String = "www.dropbox.com",
-        secureStorageAccess: SecureStorageAccess,
-        dismissSharedAppAuthController: @escaping () -> Void
-    ) {
-        self.init(
-            appKey: appKey,
-            host: host,
-            secureStorageAccess: secureStorageAccess,
-            networkSession: URLSession(configuration: .default),
-            dismissSharedAppAuthController: dismissSharedAppAuthController
-        )
-    }
-
-    init(
-        appKey: String,
-        host: String = "www.dropbox.com",
-        secureStorageAccess: SecureStorageAccess,
-        networkSession: NetworkSession,
-        dismissSharedAppAuthController: @escaping () -> Void
-    ) {
-        self.dauthRedirectURL = URL(string: "db-\(appKey)://1/connect")!
-        self.dismissSharedAppAuthController = dismissSharedAppAuthController
-        super.init(appKey: appKey, host: host, secureStorageAccess: secureStorageAccess, networkSession: networkSession)
-        urls.append(dauthRedirectURL)
-    }
-
-    internal override func extractFromUrl(_ url: URL, completion: @escaping DropboxOAuthCompletion) {
-        if let host = url.host, host == dauthRedirectURL.host { // dauth
-            extractfromDAuthURL(url, completion: completion)
-        } else {
-            extractFromRedirectURL(url, completion: completion)
-        }
-    }
-
-    internal override func checkAndPresentPlatformSpecificAuth(_ sharedApplication: SharedApplication) -> Bool {
-        if !hasApplicationQueriesSchemes() {
-            let message =
-                "DropboxSDK: unable to link; app isn't registered to query for URL schemes dbapi-2 and dbapi-8-emm. Add a dbapi-2 entry and a dbapi-8-emm entry to LSApplicationQueriesSchemes"
-            let title = "SwiftyDropbox Error"
-            sharedApplication.presentErrorMessage(message, title: title)
-            return true
-        }
-
-        if let scheme = dAuthScheme(sharedApplication) {
-            let url: URL
-            if let authSession = authSession {
-                // Code flow
-                url = dAuthURL(scheme, authSession: authSession)
-            } else {
-                // Token flow
-                let nonce = UUID().uuidString
-                UserDefaults.standard.set(nonce, forKey: kDBLinkNonce)
-                url = dAuthURL(scheme, nonce: nonce)
-            }
-            sharedApplication.presentExternalApp(url)
-            return true
-        }
-        return false
-    }
-
-    open override func handleRedirectURL(_ url: URL, completion: @escaping DropboxOAuthCompletion) -> Bool {
-        super.handleRedirectURL(url, completion: { [weak self] in
-            self?.dismissSharedAppAuthController()
-            completion($0)
-        })
-    }
-
-    fileprivate func dAuthURL(_ scheme: String, nonce: String?) -> URL {
-        var components = dauthUrlCommonComponents(with: scheme)
-        if let n = nonce {
-            let state = "oauth2:\(n)"
-            components.queryItems?.append(URLQueryItem(name: OAuthConstants.stateKey, value: state))
-        }
-        guard let url = components.url else { fatalError("Failed to create dauth url.") }
-        return url
-    }
-
-    private func dAuthURL(_ scheme: String, authSession: OAuthPKCESession) -> URL {
-        var components = dauthUrlCommonComponents(with: scheme)
-        let extraQueryParams = Self.createExtraQueryParamsString(for: authSession)
-        components.queryItems?.append(contentsOf: [
-            URLQueryItem(name: OAuthConstants.stateKey, value: authSession.state),
-            URLQueryItem(name: OAuthConstants.extraQueryParamsKey, value: extraQueryParams),
-        ])
-        guard let url = components.url else { fatalError("Failed to create dauth url.") }
-        return url
-    }
-
-    private func dauthUrlCommonComponents(with scheme: String) -> URLComponents {
-        var components = URLComponents()
-        components.scheme = scheme
-        components.host = "1"
-        components.path = "/connect"
-        components.queryItems = [
-            URLQueryItem(name: "k", value: appKey),
-            URLQueryItem(name: "s", value: ""),
-        ]
-        return components
-    }
-
-    fileprivate func dAuthScheme(_ sharedApplication: SharedApplication) -> String? {
-        if sharedApplication.canPresentExternalApp(dAuthURL("dbapi-2", nonce: nil)) {
-            return "dbapi-2"
-        } else if sharedApplication.canPresentExternalApp(dAuthURL("dbapi-8-emm", nonce: nil)) {
-            return "dbapi-8-emm"
-        } else {
-            return nil
-        }
-    }
-
-    func extractfromDAuthURL(_ url: URL, completion: @escaping DropboxOAuthCompletion) {
-        switch url.path {
-        case "/connect":
-            if let authSession = authSession {
-                handleCodeFlowUrl(url, authSession: authSession, completion: completion)
-            } else {
-                completion(extractFromTokenFlowUrl(url))
-            }
-        default:
-            completion(.error(.accessDenied, "User cancelled Dropbox link"))
-        }
-    }
-
-    /// Handles code flow response URL from DBApp.
-    /// Auth results are passed back in URL query parameters.
-    /// Expect results look like below:
-    /// 1. DBApp that can handle dauth code flow properly
-    /// ```
-    /// [
-    ///     "state": "<state_string>",
-    ///     "oauth_code": "<oauth_code>"
-    /// ]
-    /// ```
-    /// 2. Legacy DBApp that calls legacy dauth api, oauth_token should be "oauth2code:" and the code is stored under
-    /// "oauth_token_secret" key.
-    /// ```
-    /// [
-    ///     "state": "<state_string>",
-    ///     "oauth_token": "oauth2code:",
-    ///     "oauth_token_secret": "<oauth_code>"
-    /// ]
-    /// ```
-    private func handleCodeFlowUrl(
-        _ url: URL, authSession: OAuthPKCESession, completion: @escaping DropboxOAuthCompletion
-    ) {
-        let parametersMap = OAuthUtils.extractDAuthResponseFromUrl(url)
-
-        let state = parametersMap[OAuthConstants.stateKey]
-        guard state == authSession.state else {
-            completion(.error(.unknown, "Unable to verify link request"))
-            return
-        }
-
-        let authCode: String?
-        if let code = parametersMap[OAuthConstants.oauthCodeKey] {
-            authCode = code
-        } else if parametersMap[OAuthConstants.oauthTokenKey] == "oauth2code:",
-                  let code = parametersMap[OAuthConstants.oauthSecretKey] {
-            authCode = code
-        } else {
-            authCode = nil
-        }
-        if let authCode = authCode {
-            finishPkceOAuth(
-                authCode: authCode, codeVerifier: authSession.pkceData.codeVerifier, completion: completion
-            )
-        } else {
-            completion(.error(.unknown, "Unable to verify link request"))
-        }
-    }
-
-    /// Handles token flow response URL from DBApp.
-    /// Auth results are passed back in URL query parameters.
-    /// Expect results look like below:
-    /// ```
-    /// [
-    ///     "state": "oauth2:<nonce>",
-    ///     "oauth_token_secret": "<oauth2_access_token>",
-    ///     "uid": "<uid>"
-    /// ]
-    /// ```
-    private func extractFromTokenFlowUrl(_ url: URL) -> DropboxOAuthResult {
-        let parametersMap = OAuthUtils.extractDAuthResponseFromUrl(url)
-        let state = parametersMap[OAuthConstants.stateKey]
-        if let nonce = UserDefaults.standard.object(forKey: kDBLinkNonce) as? String, state == "oauth2:\(nonce)",
-           let accessToken = parametersMap[OAuthConstants.oauthSecretKey],
-           let uid = parametersMap[OAuthConstants.uidKey] {
-            return .success(DropboxAccessToken(accessToken: accessToken, uid: uid))
-        } else {
-            return .error(.unknown, "Unable to verify link request")
-        }
-    }
-
-    fileprivate func hasApplicationQueriesSchemes() -> Bool {
-        let queriesSchemes = Bundle.main.object(forInfoDictionaryKey: "LSApplicationQueriesSchemes") as? [String] ?? []
-
-        var foundApi2 = false
-        var foundApi8Emm = false
-        for scheme in queriesSchemes {
-            if scheme == "dbapi-2" {
-                foundApi2 = true
-            } else if scheme == "dbapi-8-emm" {
-                foundApi8Emm = true
-            }
-            if foundApi2 && foundApi8Emm {
-                return true
-            }
-        }
-        return false
-    }
-
-    /// Creates a string that contains all code flow query parameters.
-    private static func createExtraQueryParamsString(for authSession: OAuthPKCESession) -> String {
-        let pkceData = authSession.pkceData
-        var extraQueryParams = "\(OAuthConstants.codeChallengeKey)=\(pkceData.codeChallenge)"
-            + "&\(OAuthConstants.codeChallengeMethodKey)=\(pkceData.codeChallengeMethod)"
-            + "&\(OAuthConstants.tokenAccessTypeKey)=\(authSession.tokenAccessType)"
-            + "&\(OAuthConstants.responseTypeKey)=\(authSession.responseType)"
-        if let scopeRequest = authSession.scopeRequest {
-            if let scopeString = scopeRequest.scopeString {
-                extraQueryParams += "&\(OAuthConstants.scopeKey)=\(scopeString)"
-            }
-            if scopeRequest.includeGrantedScopes {
-                extraQueryParams += "&\(OAuthConstants.includeGrantedScopesKey)=\(scopeRequest.scopeType.rawValue)"
-            }
-        }
-        return extraQueryParams
-    }
-}
-
-#if os(iOS)
 
 public class MobileSharedApplication: SharedApplication {
     public static var sharedMobileApplication: MobileSharedApplication?
@@ -570,10 +328,6 @@ public class MobileSharedApplication: SharedApplication {
     }
 
     public func presentAuthChannel(_ authURL: URL, tryIntercept: @escaping ((URL) -> Bool), cancelHandler: @escaping (() -> Void)) {
-        if let controller = controller {
-            let safariViewController = MobileSafariViewController(url: authURL, cancelHandler: cancelHandler)
-            controller.present(safariViewController, animated: true, completion: nil)
-        }
     }
 
     public func presentExternalApp(_ url: URL) {
@@ -585,13 +339,6 @@ public class MobileSharedApplication: SharedApplication {
     }
 
     public func dismissAuthController() {
-        if let controller = controller {
-            if let presentedViewController = controller.presentedViewController {
-                if presentedViewController.isBeingDismissed == false && presentedViewController is MobileSafariViewController {
-                    controller.dismiss(animated: true, completion: nil)
-                }
-            }
-        }
     }
 
     public func presentLoading() {
@@ -611,22 +358,21 @@ public class MobileSharedApplication: SharedApplication {
     }
 
     private var isWebOAuthFlow: Bool {
-        controller?.presentedViewController is MobileSafariViewController
+        false
     }
 
     /// Web OAuth flow, present the spinner over the MobileSafariViewController.
     private func presentLoadingInWeb() {
-        let safariViewController = controller?.presentedViewController as? MobileSafariViewController
-        let loadingVC = SwiftyDropboxLoadingViewController(nibName: nil, bundle: nil)
-        loadingVC.modalPresentationStyle = .overFullScreen
-        safariViewController?.present(loadingVC, animated: false)
+//        let safariViewController = controller?.presentedViewController as? MobileSafariViewController
+//        let loadingVC = SwiftyDropboxLoadingViewController(nibName: nil, bundle: nil)
+//        loadingVC.modalPresentationStyle = .overFullScreen
+//        safariViewController?.present(loadingVC, animated: false)
+        
+        NSLog("Web OAuth flow is not supported yet.")
     }
 
     // Web OAuth flow, dismiss loading view on the MobileSafariViewController.
     private func dismissLoadingInWeb() {
-        let safariViewController = controller?.presentedViewController as? MobileSafariViewController
-        let loadingView = safariViewController?.presentedViewController as? SwiftyDropboxLoadingViewController
-        loadingView?.dismiss(animated: false)
     }
 
     /// Delegate to app to present loading if delegate is set.
@@ -652,30 +398,11 @@ public class MobileSharedApplication: SharedApplication {
     }
 }
 
-public class MobileSafariViewController: SFSafariViewController, SFSafariViewControllerDelegate {
+public class TVSafariViewController {
     var cancelHandler: (() -> Void) = {}
 
     public init(url: URL, cancelHandler: @escaping (() -> Void)) {
-        if #available(iOS 11.0, *) {
-            let config = SFSafariViewController.Configuration()
-            config.entersReaderIfAvailable = false
-            super.init(url: url, configuration: config)
-        } else {
-            super.init(url: url, entersReaderIfAvailable: false)
-        }
         self.cancelHandler = cancelHandler
-        self.delegate = self
-    }
-
-    public func safariViewController(_ controller: SFSafariViewController, didCompleteInitialLoad didLoadSuccessfully: Bool) {
-        if !didLoadSuccessfully {
-            controller.dismiss(animated: true, completion: nil)
-            cancelHandler()
-        }
-    }
-
-    public func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
-        cancelHandler()
     }
 }
 
