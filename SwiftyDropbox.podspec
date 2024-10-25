@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name         = 'SwiftyDropbox'
-  s.version      = '9.2.0'
+  s.version      = '10.1.0'
   s.summary      = 'Dropbox Swift SDK for API v2'
   s.homepage     = 'https://dropbox.com/developers/'
   s.license      = 'MIT'
@@ -11,14 +11,16 @@ Pod::Spec.new do |s|
   s.osx.source_files = 'Source/SwiftyDropbox/Platform/SwiftyDropbox_macOS/**/*.{swift,h,m}'
   s.ios.source_files = 'Source/SwiftyDropbox/Platform/SwiftyDropbox_iOS/**/*.{swift,h,m}'
 
-  s.requires_arc = true
-  s.swift_version = '5.1'
+  s.resource_bundles = {
+    'SwiftyDropboxPrivacyInfo' => ['Source/SwiftyDropbox/PrivacyInfo.xcprivacy'],
+  }
 
-  s.osx.deployment_target = '10.12'
-  s.ios.deployment_target = '11.0'
+  s.requires_arc = true
+  s.swift_version = '5.6'
+
+  s.osx.deployment_target = '10.13'
+  s.ios.deployment_target = '12.0'
 
   s.osx.frameworks = 'AppKit', 'WebKit', 'SystemConfiguration', 'Foundation'
   s.ios.frameworks = 'UIKit', 'WebKit', 'SystemConfiguration', 'Foundation'
-
-  s.dependency       'Alamofire', '~> 5.4.3'
 end

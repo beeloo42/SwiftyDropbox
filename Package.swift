@@ -1,4 +1,4 @@
-// swift-tools-version:5.1
+// swift-tools-version:5.6
 ///
 /// Copyright (c) 2016 Dropbox, Inc. All rights reserved.
 ///
@@ -13,16 +13,25 @@ let package = Package(
         .tvOS(.v13)
     ],
     products: [
-        .library(name: "SwiftyDropbox", targets:["SwiftyDropbox"]),
-    ],
-    dependencies: [
-        .package(url: "https://github.com/Alamofire/Alamofire.git", .upToNextMajor(from: "5.4.3")),
+        .library(name: "SwiftyDropbox", targets: ["SwiftyDropbox"]),
+        .library(name: "SwiftyDropboxObjC", targets: ["SwiftyDropboxObjC"]),
     ],
     targets: [
         .target(
             name: "SwiftyDropbox",
-            dependencies: ["Alamofire"],
-            path: "Source"
-        )
-    ]
+            path: "Source/SwiftyDropbox",
+            resources: [.process("PrivacyInfo.xcprivacy")]
+        ),
+        .target(
+            name: "SwiftyDropboxObjC",
+            dependencies: ["SwiftyDropbox"],
+            path: "Source/SwiftyDropboxObjC",
+            resources: [.process("PrivacyInfo.xcprivacy")]
+        ),
+        .testTarget(
+            name: "SwiftyDropboxUnitTests",
+            dependencies: ["SwiftyDropbox"]
+        ),
+    ],
+    swiftLanguageVersions: [.v5]
 )
